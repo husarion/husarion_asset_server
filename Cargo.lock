@@ -387,6 +387,7 @@ dependencies = [
  "clap",
  "futures",
  "r2r",
+ "serde_json",
  "sha2",
  "tracing",
  "tracing-subscriber",
