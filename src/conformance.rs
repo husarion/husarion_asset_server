@@ -54,6 +54,9 @@ fn main() -> anyhow::Result<()> {
     let mut node = r2r::Node::create(ctx, "husarion_asset_conformance", "")?;
     let client =
         node.create_client_untyped(&args.service, GET_ASSET_TYPE, QosProfile::default())?;
+    // Wait for the provider's service to be discovered before requesting (a fresh
+    // process needs DDS discovery to settle, especially across containers).
+    let available = r2r::Node::is_available(&client)?;
 
     let results: Arc<Mutex<Vec<Check>>> = Arc::new(Mutex::new(Vec::new()));
     let done = Arc::new(AtomicBool::new(false));
@@ -66,6 +69,15 @@ fn main() -> anyhow::Result<()> {
         let uri = args.uri.clone();
         let unknown = args.unknown_package.clone();
         spawner.spawn_local(async move {
+            if available.await.is_err() {
+                results.lock().unwrap().push(Check {
+                    name: "service available".into(),
+                    ok: false,
+                    detail: "service never became available".into(),
+                });
+                done.store(true, Ordering::SeqCst);
+                return;
+            }
             run_checks(&client, &uri, &unknown, &results).await;
             done.store(true, Ordering::SeqCst);
         })?;
