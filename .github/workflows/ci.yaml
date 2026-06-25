@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: ros:jazzy-ros-base
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: husarion_asset_server
+      - name: Fetch the message contract
+        uses: actions/checkout@v4
+        with:
+          repository: husarion/husarion_asset_msgs
+          path: msgs/src/husarion_asset_msgs
+      - name: Toolchain
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential curl clang libclang-dev python3-colcon-common-extensions
+          curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --component rustfmt clippy
+      - name: Build contract
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          cd msgs && colcon build --packages-select husarion_asset_msgs --merge-install
+      - name: Check
+        run: |
+          . "$HOME/.cargo/env"
+          . /opt/ros/jazzy/setup.sh
+          . msgs/install/setup.sh
+          cd husarion_asset_server
+          cargo fmt --check
+          cargo clippy --release -- -D warnings
+          cargo test --release

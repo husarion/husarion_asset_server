@@ -1,0 +1,29 @@
+[package]
+name = "husarion-asset-server"
+description = "Reference ROS 2 provider for the husarion_asset_msgs package:// asset standard (Rust / r2r)."
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.79"
+license = "Apache-2.0"
+repository = "https://github.com/husarion/husarion_asset_server"
+authors = ["Husarion <contact@husarion.com>"]
+
+[[bin]]
+name = "asset_server"
+path = "src/main.rs"
+
+[dependencies]
+# r2r needs a sourced ROS 2 env + libclang at build time; it generates typed
+# bindings for husarion_asset_msgs (GetAsset / AssetProviderInfo) — so the
+# provider hosts a TYPED service and needs no untyped-server FFI.
+r2r = "0.9.5"
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+futures = "0.3"
+sha2 = "0.10"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
