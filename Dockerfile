@@ -28,6 +28,7 @@ RUN bash -c "source /opt/ros/jazzy/setup.bash && \
 FROM ros:jazzy-ros-base AS provider
 COPY --from=build /msgs/install /msgs/install
 COPY --from=build /build/target/release/asset_server /usr/local/bin/
+COPY --from=build /build/target/release/asset_conformance /usr/local/bin/
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 ENTRYPOINT ["/docker-entrypoint.sh"]
