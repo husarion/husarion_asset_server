@@ -1,0 +1,125 @@
+name: husarion_asset_server release
+
+# Triggered by a `vX.Y.Z` tag pushed via `just release` from the operator's
+# host. Builds the `asset_server` binary for amd64 + arm64 and attaches them to
+# the GitHub Release, so consumers (the rosbot snap, deploy compose, …) FETCH a
+# prebuilt binary instead of compiling the r2r/Rust node from source.
+#
+# Multi-arch is built on NATIVE runners (one x64 + one arm64) — r2r links the
+# ROS rcl/rmw libraries, which can't be cross-compiled cleanly, so each arch
+# builds inside the matching `ros:jazzy-ros-base` container. The produced binary
+# has NO RPATH; it resolves librcl/rmw/rosidl + the message typesupport via
+# LD_LIBRARY_PATH at runtime — which the rosbot snap's ros2-jazzy extension +
+# its husarion-asset-msgs colcon part provide.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the GitHub Release + upload assets
+
+concurrency:
+  group: asset-server-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build binary (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    container: ros:jazzy-ros-base
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04-x64-32GB-RAM-300GB-SSD
+          - arch: arm64
+            runner: ubuntu-24.04-arm64-32GB-RAM-300GB-SSD
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: husarion_asset_server
+
+      # The message contract r2r binds. Pinned to main (the public ABI repo);
+      # bump deliberately if a GetAsset/AssetProviderInfo change needs a new tag.
+      - name: Fetch the message contract
+        uses: actions/checkout@v4
+        with:
+          repository: husarion/husarion_asset_msgs
+          path: msgs/src/husarion_asset_msgs
+
+      - name: Resolve version from tag
+        id: ver
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          version="${tag#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "Bad version from tag '$tag': '$version'" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Toolchain (rust + colcon)
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential curl clang libclang-dev git ca-certificates \
+            python3-colcon-common-extensions
+          curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+
+      - name: Build the message contract (colcon)
+        run: |
+          set -euo pipefail
+          . /opt/ros/jazzy/setup.sh
+          cd msgs && colcon build --packages-select husarion_asset_msgs --merge-install
+
+      - name: Build asset_server (cargo)
+        run: |
+          set -euo pipefail
+          . "$HOME/.cargo/env"
+          . /opt/ros/jazzy/setup.sh
+          . msgs/install/setup.sh
+          cd husarion_asset_server
+          cargo build --release --bin asset_server
+
+      - name: Stage binary + checksum
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          name="asset_server-${{ steps.ver.outputs.version }}-linux-${{ matrix.arch }}"
+          cp husarion_asset_server/target/release/asset_server "dist/$name"
+          (cd dist && sha256sum "$name" > "$name.sha256")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.arch }}
+          path: dist/*
+          retention-days: 3
+
+  release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version from tag
+        id: ver
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create the Release with binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ steps.ver.outputs.tag }}" \
+            --notes "Prebuilt \`asset_server\` binaries (amd64 + arm64). Consumed by the rosbot snap via fetch-by-version + sha256 verify; see README." \
+            dist/*
