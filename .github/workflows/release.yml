@@ -24,6 +24,13 @@ concurrency:
   group: asset-server-release-${{ github.ref }}
   cancel-in-progress: false
 
+# The build job runs in a `container:` (ros:jazzy-ros-base), where GitHub's
+# default `run` shell is **sh (dash)**, not bash — and the steps use bashisms
+# (`set -o pipefail`, `[[ =~ ]]`). Force bash for every run step.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build:
     name: Build binary (${{ matrix.arch }})
