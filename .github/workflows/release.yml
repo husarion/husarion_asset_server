@@ -60,7 +60,7 @@ jobs:
       - name: Resolve version from tag
         id: ver
         run: |
-          set -euo pipefail
+          set -eo pipefail
           tag="${GITHUB_REF#refs/tags/}"
           version="${tag#v}"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
@@ -70,7 +70,7 @@ jobs:
 
       - name: Toolchain (rust + colcon)
         run: |
-          set -euo pipefail
+          set -eo pipefail
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential curl clang libclang-dev git ca-certificates \
@@ -79,13 +79,13 @@ jobs:
 
       - name: Build the message contract (colcon)
         run: |
-          set -euo pipefail
+          set -eo pipefail
           . /opt/ros/jazzy/setup.sh
           cd msgs && colcon build --packages-select husarion_asset_msgs --merge-install
 
       - name: Build asset_server (cargo)
         run: |
-          set -euo pipefail
+          set -eo pipefail
           . "$HOME/.cargo/env"
           . /opt/ros/jazzy/setup.sh
           . msgs/install/setup.sh
@@ -94,7 +94,7 @@ jobs:
 
       - name: Stage binary + checksum
         run: |
-          set -euo pipefail
+          set -eo pipefail
           mkdir -p dist
           name="asset_server-${{ steps.ver.outputs.version }}-linux-${{ matrix.arch }}"
           cp husarion_asset_server/target/release/asset_server "dist/$name"
@@ -124,7 +124,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -eo pipefail
           gh release create "${{ steps.ver.outputs.tag }}" \
             --repo "${{ github.repository }}" \
             --title "${{ steps.ver.outputs.tag }}" \
