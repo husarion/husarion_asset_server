@@ -13,7 +13,7 @@ name = "asset_server"
 path = "src/main.rs"
 
 # The downloadable conformance suite — validates any GetAsset provider against the
-# husarion_asset_msgs standard (SPEC §16).
+# husarion_asset_msgs standard (its Conformance section).
 [[bin]]
 name = "asset_conformance"
 path = "src/conformance.rs"
