@@ -9,7 +9,7 @@ fetch-by-version, so the snap never compiles the r2r node from source.
 ## [0.2.0] — 2026-06-26
 
 ### Added
-- `asset_conformance` provider conformance suite — an untyped `GetAsset` client that validates a live provider against the spec (SPEC §16), passing 9/9 checks.
+- `asset_conformance` provider conformance suite — an untyped `GetAsset` client that validates a live provider against the [`husarion_asset_msgs`](https://github.com/husarion/husarion_asset_msgs) standard (its **Conformance** section), passing 9/9 checks.
 - Binary release pipeline: `just release` cuts a `vX.Y.Z` tag that publishes prebuilt `asset_server` binaries (amd64 + arm64) on the GitHub Release, so the rosbot snap fetches by version instead of compiling.
 
 ### Fixed
