@@ -137,7 +137,10 @@ mod tests {
             ros_namespace_remap(&v(&["--remap", "__ns:=/lynx"])),
             Some("/lynx".into())
         );
-        assert_eq!(ros_namespace_remap(&v(&["__ns:=/bare"])), Some("/bare".into()));
+        assert_eq!(
+            ros_namespace_remap(&v(&["__ns:=/bare"])),
+            Some("/bare".into())
+        );
         assert_eq!(
             ros_node_remap(&v(&["-r", "__node:=assets"])),
             Some("assets".into())

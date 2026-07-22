@@ -1,0 +1,7 @@
+# Husarion markdown style — kept in sync with husarion-cockpit + the snap repos.
+# Single-line paragraphs (no hard wraps); GFM tables survive via the mdformat-gfm
+# plugin (REQUIRED — without it tables get flattened to one line).
+wrap = "no"
+number = true
+# Tables: compact (no cell padding) — passed as --compact-tables in the
+# mdformat pre-commit hook (it is a plugin flag, not a TOML key).

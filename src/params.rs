@@ -15,8 +15,9 @@
 //! identity, set the standard way (`-r __node:=…` / `-r __ns:=…`, or a launch
 //! `name=` / `namespace=`), handled in `main.rs` via `ros_args`.
 //!
-//! [`KNOBS`] is the single source of truth: the overlay, the effective values
-//! published back for `ros2 param get`, and the docs all read from it.
+//! [`KNOBS`] is the single source of truth for the param↔env mapping: the
+//! startup overlay and the `ros2 param describe` help text both read from it
+//! (the effective values published back come from the parsed `Args`).
 
 use r2r::ParameterValue;
 
@@ -35,14 +36,15 @@ pub enum Kind {
     ListComma,
 }
 
-/// One operator knob: its ROS parameter name, backing env var, type, default (as
-/// the env string), and one-line help (surfaced by `ros2 param describe`).
+/// One operator knob: its ROS parameter name, backing env var, type, and
+/// one-line help (surfaced by `ros2 param describe`). No `default` field — the
+/// defaults live on the clap flags (every knob has one), so the effective
+/// values published back always come from the parsed `Args`.
 #[derive(Clone, Copy, Debug)]
 pub struct Knob {
     pub param: &'static str,
     pub env: &'static str,
     pub kind: Kind,
-    pub default: &'static str,
     pub help: &'static str,
 }
 
@@ -52,35 +54,30 @@ pub const KNOBS: &[Knob] = &[
         param: "owned_packages",
         env: "ASSET_SERVER_OWNED_PACKAGES",
         kind: Kind::ListComma,
-        default: "",
         help: "Explicit owned package names; empty = auto-derive from the description topic",
     },
     Knob {
         param: "description_topic",
         env: "ASSET_SERVER_DESCRIPTION_TOPIC",
         kind: Kind::Str,
-        default: "robot_description",
         help: "Latched URDF/description topic to auto-derive owned packages from",
     },
     Knob {
         param: "providers_topic",
         env: "ASSET_SERVER_PROVIDERS_TOPIC",
         kind: Kind::Str,
-        default: "/asset_providers",
         help: "Topic the provider announces AssetProviderInfo on (latched)",
     },
     Knob {
         param: "heartbeat",
         env: "ASSET_SERVER_HEARTBEAT",
         kind: Kind::Float,
-        default: "5.0",
         help: "Re-announce / heartbeat period, seconds",
     },
     Knob {
         param: "max_chunk",
         env: "ASSET_SERVER_MAX_CHUNK",
         kind: Kind::Int,
-        default: "524288",
         help: "GetAsset response chunk ceiling, bytes",
     },
 ];
@@ -113,26 +110,4 @@ pub fn value_to_env(kind: Kind, v: &ParameterValue) -> Result<Option<String>, St
         (Kind::ListComma, _) => return mismatch("a string array", v),
     };
     Ok(Some(s))
-}
-
-/// Build a ROS [`ParameterValue`] from a knob's effective env-string, for
-/// publishing effective values back so `ros2 param get` is accurate.
-pub fn env_to_value(kind: Kind, s: &str) -> ParameterValue {
-    match kind {
-        Kind::Str => ParameterValue::String(s.to_owned()),
-        Kind::Int => s
-            .parse::<i64>()
-            .map(ParameterValue::Integer)
-            .unwrap_or(ParameterValue::NotSet),
-        Kind::Float => s
-            .parse::<f64>()
-            .map(ParameterValue::Double)
-            .unwrap_or(ParameterValue::NotSet),
-        Kind::ListComma => ParameterValue::StringArray(
-            s.split(',')
-                .filter(|t| !t.is_empty())
-                .map(str::to_owned)
-                .collect(),
-        ),
-    }
 }

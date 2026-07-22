@@ -1,0 +1,20 @@
+# Run locally:  pre-commit install   (one-time, sets up the git hook)
+# Or manually:  pre-commit run --all-files
+#
+# Markdown style only — the Rust gate (fmt + clippy + test + the ament_cargo
+# build) is `just check` (Docker) + CI; too slow per-commit. `just release`
+# formats the CHANGELOG with mdformat before committing, so a release never
+# trips this hook.
+repos:
+  # Markdown style: fenced code blocks + single-line paragraphs (no hard wraps),
+  # configured in .mdformat.toml (wrap = "no"). Plugins are REQUIRED:
+  #   - mdformat-gfm:         keep GFM tables (else they're flattened to one line)
+  #   - mdformat-frontmatter: preserve any YAML frontmatter
+  - repo: https://github.com/hukkin/mdformat
+    rev: 1.0.0
+    hooks:
+      - id: mdformat
+        args: [--compact-tables]
+        additional_dependencies:
+          - mdformat-gfm==1.0.0
+          - mdformat-frontmatter==2.1.2

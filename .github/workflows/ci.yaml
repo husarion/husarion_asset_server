@@ -8,7 +8,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: ros:jazzy-ros-base
+    # ros-core, NOT ros-base: mirrors the image's build stage. r2r binds + links
+    # every rosidl package visible at build time, so the gate must compile
+    # against the same package set the published image builds against.
+    container: ros:jazzy-ros-core
     steps:
       - uses: actions/checkout@v4
         with:

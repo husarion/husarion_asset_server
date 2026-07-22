@@ -51,7 +51,11 @@ const DEFAULT_MAX_CHUNK: usize = 512 * 1024;
 )]
 struct Args {
     /// ROS node name (a launch `name=` / `-r __node:=…` overrides this).
-    #[arg(long, env = "ASSET_SERVER_NODE", default_value = "husarion_asset_server")]
+    #[arg(
+        long,
+        env = "ASSET_SERVER_NODE",
+        default_value = "husarion_asset_server"
+    )]
     node_name: String,
     /// ROS namespace (a launch `namespace=` / `-r __ns:=…` overrides this).
     #[arg(long, env = "ROS_NAMESPACE", default_value = "")]
@@ -60,10 +64,18 @@ struct Args {
     #[arg(long, env = "ASSET_SERVER_OWNED_PACKAGES", value_delimiter = ',')]
     owned_packages: Vec<String>,
     /// Latched URDF source for auto-derivation.
-    #[arg(long, env = "ASSET_SERVER_DESCRIPTION_TOPIC", default_value = "robot_description")]
+    #[arg(
+        long,
+        env = "ASSET_SERVER_DESCRIPTION_TOPIC",
+        default_value = "robot_description"
+    )]
     description_topic: String,
     /// Where AssetProviderInfo is announced.
-    #[arg(long, env = "ASSET_SERVER_PROVIDERS_TOPIC", default_value = "/asset_providers")]
+    #[arg(
+        long,
+        env = "ASSET_SERVER_PROVIDERS_TOPIC",
+        default_value = "/asset_providers"
+    )]
     providers_topic: String,
     /// Re-announce period (seconds).
     #[arg(long, env = "ASSET_SERVER_HEARTBEAT", default_value_t = 5.0)]
@@ -165,9 +177,12 @@ fn main() -> anyhow::Result<()> {
     // work; configuration is startup-only, so a runtime `set` is logged as
     // restart-to-apply. Both futures run on the same LocalPool as the handlers.
     match node.make_parameter_handler() {
-        Ok((handler, mut changes)) => {
+        Ok((handler, changes)) => {
             spawner.spawn_local(handler)?;
             spawner.spawn_local(async move {
+                // Box::pin: StreamExt::next needs Unpin, which r2r's stream
+                // doesn't guarantee (the bridge boxes it for the same reason).
+                let mut changes = Box::pin(changes);
                 while let Some((name, _)) = changes.next().await {
                     tracing::warn!(param = %name,
                         "ROS parameter changed at runtime; asset_server applies configuration at startup — restart for it to take effect");

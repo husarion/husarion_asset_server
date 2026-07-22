@@ -4,8 +4,12 @@
   ament_cargo manifest so `husarion_asset_server` drops into a colcon workspace
   and is usable from a launch file the standard way:
 
-      colcon build --packages-select husarion_asset_server
+      colcon build (packages-select husarion_asset_server)
       ros2 run husarion_asset_server asset_server
+
+  NB: XML comments cannot contain a double hyphen, hence the parenthesized flag
+  above (a literal one breaks catkin_pkg's parse and colcon then misidentifies
+  the package as plain cargo).
 
   This node uses r2r (not rclrs). r2r generates TYPED bindings for
   husarion_asset_msgs (GetAsset / AssetProviderInfo) from the package on

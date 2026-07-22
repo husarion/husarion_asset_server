@@ -16,8 +16,14 @@
 # combine). So this one image resolves package:// for any robot once its
 # descriptions are added, independent of the driver version.
 
-# ---- build: ros-base has the build tooling (colcon, libclang for r2r) ---------
-FROM ros:jazzy-ros-base AS build
+# ---- build: SAME baseline as the runtime (ros-core) + build tooling -----------
+# INVARIANT: build and runtime must expose the SAME rosidl package set. r2r binds
+# and LINKS the typesupport of every rosidl package on AMENT_PREFIX_PATH at build
+# time — building on ros-base would link rosbag2_interfaces + tf2_msgs (the
+# base-vs-core delta, verified against the jazzy images), which a ros-core
+# runtime lacks, and the binary fails to load. ros-base has no build tooling
+# advantage anyway (colcon/clang are apt-installed either way).
+FROM ros:jazzy-ros-core AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential curl clang libclang-dev git \
         python3-colcon-common-extensions python3-pip \
@@ -55,17 +61,18 @@ RUN bash -c "source /opt/ros/jazzy/setup.bash && \
         --install-base /opt/husarion_asset_server/install \
         --cargo-args --release"
 
-# ---- runtime: ros-core is the minimal ROS 2 base; add every selectable RMW ----
+# ---- runtime: ros-core (same rosidl set as the build stage) + every RMW -------
 FROM ros:jazzy-ros-core AS provider
-# fastrtps is the ros-core default; add cyclonedds + zenoh so the provider loads
-# whatever RMW ros.env selects (a plain ros-core crash-loops on a non-default
-# RMW). std_msgs is the typesupport the description subscription links at runtime
-# (ros-core omits it; husarion_asset_msgs comes in via /msgs/install below).
+# fastrtps is the ros-core default (kept explicit for self-documentation); add
+# cyclonedds + zenoh so the provider loads whatever RMW ros.env selects (a
+# single-RMW image crash-loops the moment the operator switches). RMW packages
+# add no rosidl packages, so build/runtime symmetry holds; std_msgs + the rest
+# of the typesupport the binary links is already in ros-core (verified), and
+# husarion_asset_msgs comes in via /msgs/install below.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-rmw-cyclonedds-cpp \
         ros-jazzy-rmw-fastrtps-cpp \
         ros-jazzy-rmw-zenoh-cpp \
-        ros-jazzy-std-msgs \
     && rm -rf /var/lib/apt/lists/*
 # The message typesupport r2r links against at runtime + the ament_cargo install
 # prefix (the executable + package.xml, so `ros2 run`/`ros2 launch` resolve it).

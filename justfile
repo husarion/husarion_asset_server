@@ -1,17 +1,95 @@
-# husarion_asset_server — release automation.
+# husarion_asset_server — dev + release automation.
 #
-#   just release            cut a release: bump version + CHANGELOG, tag vX.Y.Z, push
-#
-# A `vX.Y.Z` tag triggers .github/workflows/release.yml, which builds the
-# `asset_server` binary for amd64 + arm64 (native runners, in ros:jazzy-ros-base)
-# and attaches them to the GitHub Release. The rosbot snap fetches the binary by
-# version (no in-snap Rust build). The full build/clippy/test gate runs in CI
-# (this r2r crate needs a sourced ROS env to compile — the dev host has none), so
-# `just release` only bumps + tags + pushes; CI is the build gate on the tag.
+#   just check     full gate, entirely in Docker (no host cargo/ROS): fmt +
+#                  clippy -D warnings + tests + the ament_cargo (colcon) build
+#                  + ros2-run resolution, inside a cached ros:jazzy-ros-core
+#                  toolchain image — the same package baseline the published
+#                  image builds against. Needs ../husarion_asset_msgs.
+#   just image     build the provider image locally (husarion/asset-server:dev).
+#   just release   run the gate, bump Cargo.toml + Cargo.lock + package.xml +
+#                  CHANGELOG (an "## [Unreleased]" section is folded in
+#                  automatically — no manual changelog surgery), tag vX.Y.Z,
+#                  push. The tag triggers BOTH workflows: release.yml (prebuilt
+#                  binaries for the rosbot snap, built in ros-base to match the
+#                  snap's ros2-extension runtime) and image.yml (multi-arch
+#                  husarion/asset-server:X.Y.Z + :latest on Docker Hub).
 
 set shell := ["bash", "-uc"]
 
-release:
+# The check gate's toolchain image (cached; rebuilt only when this file changes it).
+builder_image := "has-builder:jazzy"
+
+# Toolchain image for `just check`: ros:jazzy-ros-core + compilers + rustup
+# (fmt, clippy) + the ament_cargo plumbing. ros-core, NOT ros-base, on purpose —
+# r2r binds + links the typesupport of EVERY rosidl package visible at build
+# time, so the gate must compile against the same package set the published
+# image's build stage sees (see the Dockerfile invariant). linux/amd64 is
+# forced: this host caches arm64 ros images (buildx leftovers), and a silent
+# QEMU fallback would turn the compile into hours.
+builder:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    docker build --platform linux/amd64 -t {{builder_image}} - <<'DOCKERFILE'
+    FROM ros:jazzy-ros-core
+    RUN apt-get update && apt-get install -y --no-install-recommends \
+            build-essential curl clang libclang-dev git \
+            python3-colcon-common-extensions python3-pip \
+        && rm -rf /var/lib/apt/lists/*
+    RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal \
+            --component rustfmt --component clippy
+    ENV PATH="/root/.cargo/bin:${PATH}"
+    RUN cargo install cargo-ament-build && \
+        pip3 install --no-cache-dir --break-system-packages --ignore-installed \
+            colcon-cargo colcon-ros-cargo
+    DOCKERFILE
+
+# The full gate. Repo + contract mounted read-only; cargo registry/target live
+# in named volumes so re-runs are incremental. Ends with the ament_cargo build
+# + `ros2 pkg` resolution — the path `ros2 run husarion_asset_server
+# asset_server` and the image build actually exercise.
+check: builder
+    #!/usr/bin/env bash
+    set -euo pipefail
+    here="$(dirname "$(realpath "{{justfile()}}")")"
+    msgs="$(realpath -m "$here/../husarion_asset_msgs")"
+    [ -d "$msgs" ] || { echo "check: needs the contract at ../husarion_asset_msgs (git clone https://github.com/husarion/husarion_asset_msgs)" >&2; exit 1; }
+    docker run --rm --platform linux/amd64 \
+        -v "$here":/repo:ro \
+        -v "$msgs":/contract:ro \
+        -v has-cargo-registry:/root/.cargo/registry \
+        -v has-target:/target \
+        -e CARGO_TARGET_DIR=/target \
+        {{builder_image}} bash -c '
+            set -eo pipefail
+            source /opt/ros/jazzy/setup.bash
+            cd /repo && cargo fmt --check
+            mkdir -p /msgs/src && cp -r /contract /msgs/src/husarion_asset_msgs
+            (cd /msgs && colcon build --packages-select husarion_asset_msgs --merge-install)
+            source /msgs/install/setup.bash
+            cd /repo
+            cargo clippy --release --all-targets -- -D warnings
+            cargo test --release
+            mkdir -p /ws/src/husarion_asset_server
+            cp Cargo.toml Cargo.lock package.xml /ws/src/husarion_asset_server/
+            cp -r src /ws/src/husarion_asset_server/src
+            (cd /ws && colcon build --packages-select husarion_asset_server --cargo-args --release)
+            source /ws/install/setup.bash
+            ros2 pkg prefix husarion_asset_server
+            test -x /ws/install/husarion_asset_server/lib/husarion_asset_server/asset_server
+            echo "check: fmt + clippy + test + ament_cargo build + ros2 pkg resolution ALL GREEN"
+        '
+
+# Build the provider image locally from the sibling contract checkout.
+image:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    here="$(dirname "$(realpath "{{justfile()}}")")"
+    msgs="$(realpath -m "$here/../husarion_asset_msgs")"
+    [ -d "$msgs" ] || { echo "image: needs ../husarion_asset_msgs" >&2; exit 1; }
+    docker build --platform linux/amd64 -t husarion/asset-server:dev \
+        --build-context husarion_asset_msgs="$msgs" "$here"
+
+release: check
     #!/usr/bin/env bash
     set -euo pipefail
     here="$(dirname "$(realpath "{{justfile()}}")")"
@@ -53,6 +131,7 @@ release:
         printf 'You are preparing a release of husarion_asset_server (a Rust/r2r ROS 2 node serving package:// assets over a GetAsset service).\n\n'
         printf 'Current version: %s\nTag: vX.Y.Z\n\nCommits (newest first):\n\n%s\n\n' "$current" "$commits"
         printf 'Use the Read tool on %s to match the tone. Keep-a-Changelog format (### Added/Changed/Fixed/Removed; omit empty groups).\n' "$changelog"
+        printf 'If the changelog has an "## [Unreleased]" section, its bullets are pre-written notes for exactly these commits — fold them into your section (keep their wording where better; dedupe against the commits). The tooling deletes the [Unreleased] section when applying, so nothing you skip survives.\n'
         printf 'Pick the semver bump (patch=fixes, minor=features, major=breaking). Concise, user-facing bullets. Do NOT include the ## header.\n\n'
         printf 'Final message MUST be exactly:\n\n  VERSION: X.Y.Z\n  ---SECTION---\n  ### Added\n  - foo\n  ---END---\n\nReal newlines inside the block.\n'
     } > "$pf"
@@ -77,11 +156,11 @@ release:
     # ---- 5. confirm, commit, tag, push ------------------------------
     echo "=== release diff ==="
     git --no-pager diff "$cargo_toml" "$cargo_lock" "$package_xml" "$changelog"; echo
-    read -rp "Commit, tag ${new_tag}, push (→ CI builds + uploads the binaries)? [y/N] " confirm
+    read -rp "Commit, tag ${new_tag}, push (→ CI: prebuilt binaries + the husarion/asset-server image)? [y/N] " confirm
     [ "$confirm" = "y" ] || [ "$confirm" = "Y" ] || { echo "release: aborted."; git checkout -- "$cargo_toml" "$cargo_lock" "$package_xml" "$changelog"; exit 1; }
     git add "$cargo_toml" "$cargo_lock" "$package_xml" "$changelog"
     git commit -m "chore: release ${new_tag}"
     git tag "$new_tag"
     git push origin main
     git push origin "$new_tag"
-    echo "Pushed ${new_tag}. CI: .github/workflows/release.yml builds amd64+arm64 binaries → GitHub Release."
+    echo "Pushed ${new_tag}. CI: release.yml → binaries on the GitHub Release; image.yml → husarion/asset-server:${version} + :latest on Docker Hub."

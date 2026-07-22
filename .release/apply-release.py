@@ -63,6 +63,11 @@ def prepend_changelog(changelog: pathlib.Path, version: str, section: str) -> No
     today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
     block = f"## [{version}] — {today}\n\n{section.rstrip()}\n\n"
     text = changelog.read_text() if changelog.exists() else "# Changelog\n\n"
+    # Fold away an "[Unreleased]" staging section: the justfile instructs claude
+    # to incorporate its bullets into the generated section, and this removal
+    # keeps the file from carrying the same notes twice. No manual pre-release
+    # changelog surgery needed.
+    text = re.sub(r"(?ms)^## \[Unreleased\].*?(?=^## \[|\Z)", "", text)
     m = re.search(r"(?m)^## \[", text)
     if m:
         text = text[: m.start()] + block + text[m.start():]
