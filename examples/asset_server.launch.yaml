@@ -1,0 +1,28 @@
+# ROS 2 YAML launch file for husarion_asset_server.
+#
+# Run directly:
+#   ros2 launch asset_server.launch.yaml
+# or copy into your own package's launch/ dir and:
+#   ros2 launch <your_package> asset_server.launch.yaml
+#
+# The provider is a standard ROS 2 node: every knob is a parameter (set inline
+# below or load a params file), and `namespace:` remaps it the normal way so it
+# lands on /<namespace>/get_asset and auto-derives owned packages from
+# /<namespace>/robot_description.
+launch:
+  - node:
+      pkg: "husarion_asset_server"
+      exec: "asset_server"
+      name: "husarion_asset_server"
+      namespace: "/rosbot"
+      output: "screen"
+      param:
+        # Empty owned_packages = auto-derive from the description topic below.
+        - name: "description_topic"
+          value: "robot_description"
+        - name: "providers_topic"
+          value: "/asset_providers"
+        - name: "heartbeat"
+          value: 5.0
+        - name: "max_chunk"
+          value: 524288

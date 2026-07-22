@@ -1,0 +1,30 @@
+# ROS 2 parameters file for husarion_asset_server.
+#
+# Every operator knob is a ROS 2 parameter. Use this file with either:
+#   ros2 run husarion_asset_server asset_server --ros-args \
+#     --params-file asset_server.params.yaml
+# or from a launch file (Python: parameters=["…/asset_server.params.yaml"]).
+#
+# `/**` applies to the node under any namespace/name. Precedence is
+#   CLI flag  >  these parameters  >  ASSET_SERVER_* env vars  >  built-in defaults.
+# Run `ros2 param list` / `ros2 param describe <node> <name>` to see them all.
+#
+# The node name + namespace are NOT parameters — set them the standard way
+# (launch `name=` / `namespace=`, or `-r __node:=…` / `-r __ns:=…`).
+/**:
+  ros__parameters:
+    # Explicit owned packages (a list). Leave unset/empty to auto-derive the
+    # owned set from the packages referenced by the description topic's URDF.
+    # owned_packages: ["husarion_ugv_description"]
+
+    # Latched URDF/description topic used for auto-derivation.
+    description_topic: "robot_description"
+
+    # Topic the provider announces AssetProviderInfo on (latched).
+    providers_topic: "/asset_providers"
+
+    # Re-announce / heartbeat period, seconds.
+    heartbeat: 5.0
+
+    # GetAsset response chunk ceiling, bytes (512 KiB — under common RMW limits).
+    max_chunk: 524288

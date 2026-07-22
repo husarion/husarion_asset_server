@@ -19,6 +19,7 @@ release:
 
     cargo_toml="Cargo.toml"
     cargo_lock="Cargo.lock"
+    package_xml="package.xml"
     changelog="CHANGELOG.md"
 
     # ---- 1. sanity --------------------------------------------------
@@ -68,17 +69,17 @@ release:
 
     # ---- 4. apply + gate the changelog format -----------------------
     printf '%s\n' "$section" > "$sf"
-    python3 .release/apply-release.py "$version" "$sf" "$cargo_toml" "$cargo_lock" "$changelog"
+    python3 .release/apply-release.py "$version" "$sf" "$cargo_toml" "$cargo_lock" "$package_xml" "$changelog"
     if command -v pre-commit >/dev/null 2>&1; then
         pre-commit run mdformat --files "$changelog" >/dev/null 2>&1 || true
     fi
 
     # ---- 5. confirm, commit, tag, push ------------------------------
     echo "=== release diff ==="
-    git --no-pager diff "$cargo_toml" "$cargo_lock" "$changelog"; echo
+    git --no-pager diff "$cargo_toml" "$cargo_lock" "$package_xml" "$changelog"; echo
     read -rp "Commit, tag ${new_tag}, push (→ CI builds + uploads the binaries)? [y/N] " confirm
-    [ "$confirm" = "y" ] || [ "$confirm" = "Y" ] || { echo "release: aborted."; git checkout -- "$cargo_toml" "$cargo_lock" "$changelog"; exit 1; }
-    git add "$cargo_toml" "$cargo_lock" "$changelog"
+    [ "$confirm" = "y" ] || [ "$confirm" = "Y" ] || { echo "release: aborted."; git checkout -- "$cargo_toml" "$cargo_lock" "$package_xml" "$changelog"; exit 1; }
+    git add "$cargo_toml" "$cargo_lock" "$package_xml" "$changelog"
     git commit -m "chore: release ${new_tag}"
     git tag "$new_tag"
     git push origin main

@@ -14,6 +14,15 @@
 //! auto-derived from a co-located `robot_description`. Security: `package://` only,
 //! no `..` traversal, owned-set only, resolved real path confined to the package
 //! share dir.
+//!
+//! First-class ROS 2 node: it drops into a colcon workspace (`package.xml`,
+//! `build_type ament_cargo`), runs as `ros2 run husarion_asset_server
+//! asset_server` or from a launch `Node(...)`, honors the launch `--ros-args`
+//! block (`namespace=` / `name=` / remaps), and exposes every operator knob as a
+//! ROS 2 parameter (`ros2 param list/get/describe`). See `params` + `ros_args`.
+
+mod params;
+mod ros_args;
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
@@ -29,7 +38,7 @@ use r2r::builtin_interfaces::msg::Time;
 use r2r::husarion_asset_msgs::msg::AssetProviderInfo;
 use r2r::husarion_asset_msgs::srv::GetAsset;
 use r2r::std_msgs::msg::String as RosString;
-use r2r::QosProfile;
+use r2r::{Parameter, ParameterValue, QosProfile};
 use sha2::{Digest, Sha256};
 
 /// Default response chunk ceiling — comfortably under common RMW service limits.
@@ -41,31 +50,72 @@ const DEFAULT_MAX_CHUNK: usize = 512 * 1024;
     about = "Reference package:// asset provider (r2r)"
 )]
 struct Args {
-    /// ROS node name (must be unique per provider on the graph).
-    #[arg(
-        long,
-        env = "ASSET_SERVER_NODE",
-        default_value = "husarion_asset_server"
-    )]
+    /// ROS node name (a launch `name=` / `-r __node:=…` overrides this).
+    #[arg(long, env = "ASSET_SERVER_NODE", default_value = "husarion_asset_server")]
     node_name: String,
-    /// ROS namespace (empty = global).
+    /// ROS namespace (a launch `namespace=` / `-r __ns:=…` overrides this).
     #[arg(long, env = "ROS_NAMESPACE", default_value = "")]
     namespace: String,
     /// Explicit owned packages. When empty, derive from the description topic.
-    #[arg(long, value_delimiter = ',')]
+    #[arg(long, env = "ASSET_SERVER_OWNED_PACKAGES", value_delimiter = ',')]
     owned_packages: Vec<String>,
     /// Latched URDF source for auto-derivation.
-    #[arg(long, default_value = "robot_description")]
+    #[arg(long, env = "ASSET_SERVER_DESCRIPTION_TOPIC", default_value = "robot_description")]
     description_topic: String,
     /// Where AssetProviderInfo is announced.
-    #[arg(long, default_value = "/asset_providers")]
+    #[arg(long, env = "ASSET_SERVER_PROVIDERS_TOPIC", default_value = "/asset_providers")]
     providers_topic: String,
     /// Re-announce period (seconds).
-    #[arg(long, default_value_t = 5.0)]
+    #[arg(long, env = "ASSET_SERVER_HEARTBEAT", default_value_t = 5.0)]
     heartbeat: f64,
     /// Response chunk ceiling (bytes).
-    #[arg(long, default_value_t = DEFAULT_MAX_CHUNK)]
+    #[arg(long, env = "ASSET_SERVER_MAX_CHUNK", default_value_t = DEFAULT_MAX_CHUNK)]
     max_chunk: usize,
+}
+
+/// Fold ROS 2 parameter overrides into the environment (a set param **replaces**
+/// its env var, so precedence becomes `param > env`; an explicit CLI flag still
+/// wins because clap treats env as the fallback). Unknown params and type
+/// mismatches warn loudly rather than silently misconfiguring the provider.
+fn apply_param_overlay(overrides: &[(String, ParameterValue)]) {
+    for (name, value) in overrides {
+        let Some(k) = params::knob(name) else {
+            tracing::warn!(param = %name, "unknown ROS 2 parameter (ignored); `ros2 param list` shows the supported names");
+            continue;
+        };
+        match params::value_to_env(k.kind, value) {
+            Ok(Some(s)) => {
+                std::env::set_var(k.env, s);
+                tracing::info!(param = %name, "applied ROS 2 parameter");
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!(param = %name, "{e}"),
+        }
+    }
+}
+
+/// The effective value of every knob, published back onto the node so `ros2 param
+/// get/list/describe` report the resolved configuration, not just raw overrides.
+fn effective_params(args: &Args) -> Vec<(String, ParameterValue)> {
+    vec![
+        (
+            "owned_packages".into(),
+            ParameterValue::StringArray(args.owned_packages.clone()),
+        ),
+        (
+            "description_topic".into(),
+            ParameterValue::String(args.description_topic.clone()),
+        ),
+        (
+            "providers_topic".into(),
+            ParameterValue::String(args.providers_topic.clone()),
+        ),
+        ("heartbeat".into(), ParameterValue::Double(args.heartbeat)),
+        (
+            "max_chunk".into(),
+            ParameterValue::Integer(args.max_chunk as i64),
+        ),
+    ]
 }
 
 fn main() -> anyhow::Result<()> {
@@ -75,9 +125,62 @@ fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let args = Args::parse();
+    // Be a well-behaved ROS 2 node: `ros2 run` / a launch `Node(...)` append a
+    // trailing `--ros-args …` block (remaps, params, log config) that clap can't
+    // parse. Hand clap only the non-ROS argv; r2r's `Context::create()` still sees
+    // the full process argv and honors remaps in rcl. r2r takes an explicit node
+    // name + namespace, so mirror the launch `__node` / `__ns` remaps into them (a
+    // launch `name=` / `namespace=` then wins over the flags / env).
+    let (clap_argv, ros_argv) = ros_args::strip_ros_args(std::env::args());
+    // First parse handles `--help`/`--version` + validates flags before any ROS
+    // init, and gives the identity when no remap is present.
+    let first = Args::parse_from(clap_argv.iter().cloned());
+    let node_name = ros_args::ros_node_remap(&ros_argv).unwrap_or_else(|| first.node_name.clone());
+    let namespace =
+        ros_args::ros_namespace_remap(&ros_argv).unwrap_or_else(|| first.namespace.clone());
+
     let ctx = r2r::Context::create()?;
-    let mut node = r2r::Node::create(ctx, &args.node_name, &args.namespace)?;
+    let mut node = r2r::Node::create(ctx, &node_name, &namespace)?;
+    tracing::info!(node = %node_name, namespace = %namespace, "ROS node created");
+
+    let pool = LocalPool::new();
+    let spawner = pool.spawner();
+
+    // Read the ROS 2 parameter overrides rcl populated from a launch
+    // `parameters=[…]` block, a params YAML, or `-p k:=v`, and fold each into its
+    // env var BEFORE the CLI is re-parsed — so a param pre-empts env while an
+    // explicit flag still wins. Precedence: flag > param > env > default.
+    let overrides: Vec<(String, ParameterValue)> = node
+        .params
+        .lock()
+        .map(|p| {
+            p.iter()
+                .map(|(k, v)| (k.clone(), v.value.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    apply_param_overlay(&overrides);
+
+    // Stand up the standard parameter services so `ros2 param list/get/describe`
+    // work; configuration is startup-only, so a runtime `set` is logged as
+    // restart-to-apply. Both futures run on the same LocalPool as the handlers.
+    match node.make_parameter_handler() {
+        Ok((handler, mut changes)) => {
+            spawner.spawn_local(handler)?;
+            spawner.spawn_local(async move {
+                while let Some((name, _)) = changes.next().await {
+                    tracing::warn!(param = %name,
+                        "ROS parameter changed at runtime; asset_server applies configuration at startup — restart for it to take effect");
+                }
+            })?;
+        }
+        Err(err) => tracing::warn!(%err, "ROS parameter services unavailable"),
+    }
+
+    // Re-parse now that env reflects the params; pin the resolved node identity.
+    let mut args = Args::parse_from(clap_argv.iter().cloned());
+    args.node_name = node_name;
+    args.namespace = namespace;
 
     let owned: Arc<Mutex<HashSet<String>>> =
         Arc::new(Mutex::new(args.owned_packages.iter().cloned().collect()));
@@ -102,8 +205,14 @@ fn main() -> anyhow::Result<()> {
         None
     };
 
-    let pool = LocalPool::new();
-    let spawner = pool.spawner();
+    // Publish the resolved values back so `ros2 param get/list/describe` report the
+    // effective configuration.
+    if let Ok(mut p) = node.params.lock() {
+        for (name, value) in effective_params(&args) {
+            let description = params::knob(&name).map(|k| k.help).unwrap_or("");
+            p.insert(name, Parameter { value, description });
+        }
+    }
 
     // GetAsset handler.
     {

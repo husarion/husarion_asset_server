@@ -1,5 +1,10 @@
+# NB: the cargo package name MUST equal the ament package.xml <name> (which
+# can't contain dashes) so `ros2 run husarion_asset_server asset_server` and
+# colcon resolve it — same rule as husarion_rosbridge. The BINARIES keep their
+# names (`asset_server`, `asset_conformance`), so the rosbot snap's
+# fetch-by-version path is unaffected by this rename.
 [package]
-name = "husarion-asset-server"
+name = "husarion_asset_server"
 description = "Reference ROS 2 provider for the husarion_asset_msgs package:// asset standard (Rust / r2r)."
 version = "0.2.0"
 edition = "2021"

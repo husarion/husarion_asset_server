@@ -1,0 +1,160 @@
+name: husarion_asset_server image
+
+# Builds and publishes the UNIVERSAL, ROS 2-native provider image to Docker Hub
+# (husarion/asset-server:<version> + :latest). Triggered by a `vX.Y.Z` tag pushed
+# via `just release` (the same tag that publishes the prebuilt binaries in
+# release.yml), or manually via workflow_dispatch with an explicit version.
+#
+# The image is mesh-less + all-RMW (see Dockerfile) — the driver's descriptions
+# are layered on top at deploy time, so this one image is driver-independent.
+#
+# Multi-arch is built on NATIVE runners (one x64 + one arm64) in parallel, pushed
+# by digest; a final job stitches the digests into one manifest tag. r2r links
+# the ROS rcl/rmw libraries and can't be cross-compiled cleanly, and QEMU makes
+# the Rust + ROS 2 + colcon build take hours — so each arch builds natively.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to publish (e.g. 0.3.0), without the leading v"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asset-server-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: husarion/asset-server
+  # The typed msg contract r2r binds; buildx clones it straight from its git URL
+  # (the same form the cockpit's dev compose + the bridge's release use). Bump the
+  # ref deliberately if a GetAsset/AssetProviderInfo change needs it.
+  ASSET_MSGS_REF: main
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Build & push by digest (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04-x64-32GB-RAM-300GB-SSD
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm64-32GB-RAM-300GB-SSD
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          set -eo pipefail
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            version="${{ github.event.inputs.version }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+            version="${tag#v}"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "Bad version '$version'" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker Hub login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: provider
+          build-contexts: |
+            husarion_asset_msgs=https://github.com/husarion/husarion_asset_msgs.git#${{ env.ASSET_MSGS_REF }}
+          platforms: ${{ matrix.platform }}
+          no-cache: true
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          set -eo pipefail
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 3
+
+  manifest:
+    name: Assemble multi-arch manifest
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          set -eo pipefail
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            version="${{ github.event.inputs.version }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+            version="${tag#v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Docker Hub login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create + push the manifest
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          version="${{ steps.ver.outputs.version }}"
+          docker buildx imagetools create \
+            -t "${IMAGE}:${version}" \
+            -t "${IMAGE}:latest" \
+            $(printf "${IMAGE}@sha256:%s " *)
+          docker buildx imagetools inspect "${IMAGE}:${version}"
+
+      - name: Sync Docker Hub overview
+        # Non-fatal: needs a DOCKERHUB_TOKEN with Repo Admin scope; a push-only
+        # token 401s the description endpoint and must not fail the publish.
+        continue-on-error: true
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: husarion/asset-server
+          readme-filepath: README.md
+          short-description: "ROS 2 package:// asset provider — serves robot mesh/URDF assets to husarion_rosbridge (GetAsset)."

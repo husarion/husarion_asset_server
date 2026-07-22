@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<!--
+  ament_cargo manifest so `husarion_asset_server` drops into a colcon workspace
+  and is usable from a launch file the standard way:
+
+      colcon build --packages-select husarion_asset_server
+      ros2 run husarion_asset_server asset_server
+
+  This node uses r2r (not rclrs). r2r generates TYPED bindings for
+  husarion_asset_msgs (GetAsset / AssetProviderInfo) from the package on
+  AMENT_PREFIX_PATH at build time — but it does so via its own build-script
+  bindgen, so this package needs NONE of the ros2_rust / rosidl_generator_rs /
+  colcon-ros-cargo patch-table machinery a typed rclrs node needs. Build deps
+  not expressible as ROS deps: clang + libclang-dev for r2r's bindgen, plus
+  colcon-ros-cargo + cargo-ament-build and a Rust toolchain (rustup).
+
+  The cargo package name (Cargo.toml) MUST equal <name> below — ament_cargo
+  installs the binary to lib/<cargo-package-name>/ and `ros2 run <pkg> <exe>`
+  resolves lib/<ament-package-name>/<exe>. The <version> is maintained by hand:
+  keep it in lockstep with Cargo.toml on release (see justfile).
+-->
+<package format="3">
+  <name>husarion_asset_server</name>
+  <version>0.2.0</version>
+  <description>
+    Reference ROS 2 provider for the husarion_asset_msgs package:// asset
+    standard (Rust / r2r): serves a component's meshes / URDF resources over a
+    GetAsset service and announces the packages it owns.
+  </description>
+  <maintainer email="contact@husarion.com">Husarion</maintainer>
+  <license>Apache-2.0</license>
+  <url type="repository">https://github.com/husarion/husarion_asset_server</url>
+
+  <!-- The typed msg/srv package r2r binds; forces colcon build ordering + rosdep. -->
+  <depend>husarion_asset_msgs</depend>
+
+  <export>
+    <build_type>ament_cargo</build_type>
+  </export>
+</package>
