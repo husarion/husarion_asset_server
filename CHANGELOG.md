@@ -4,7 +4,7 @@ All notable changes to `husarion_asset_server`. Format follows [Keep a Changelog
 
 A `vX.Y.Z` tag (cut via `just release`) triggers two workflows: `release.yml` publishes prebuilt `asset_server` binaries (amd64 + arm64) on the GitHub Release — consumed by the rosbot snap via fetch-by-version, so the snap never compiles the r2r node from source — and `image.yml` publishes the universal provider image `husarion/asset-server:X.Y.Z` + `:latest` to Docker Hub. An `## [Unreleased]` section here is folded into the release section automatically by `just release`.
 
-## [Unreleased]
+## [0.3.1] — 2026-07-24
 
 ### Fixed
 

@@ -26,7 +26,7 @@
 -->
 <package format="3">
   <name>husarion_asset_server</name>
-  <version>0.3.0</version>
+  <version>0.3.1</version>
   <description>
     Reference ROS 2 provider for the husarion_asset_msgs package:// asset
     standard (Rust / r2r): serves a component's meshes / URDF resources over a
