@@ -27,6 +27,7 @@ mod ros_args;
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -136,6 +137,16 @@ fn main() -> anyhow::Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
+
+    // The image entrypoint execs this binary as in-namespace PID 1, which gets
+    // no default signal dispositions — an unhandled SIGTERM is DISCARDED, so a
+    // `docker stop` (and every host shutdown) would hang for the full kill
+    // timeout and end in SIGKILL. Register before any ROS setup so a stop
+    // during startup exits promptly too.
+    let term = Arc::new(AtomicBool::new(false));
+    for sig in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT] {
+        signal_hook::flag::register(sig, Arc::clone(&term))?;
+    }
 
     // Be a well-behaved ROS 2 node: `ros2 run` / a launch `Node(...)` append a
     // trailing `--ros-args …` block (remaps, params, log config) that clap can't
@@ -294,10 +305,12 @@ fn main() -> anyhow::Result<()> {
 
     tracing::info!(service = %service_name, "husarion_asset_server ready");
     let mut pool = pool;
-    loop {
+    while !term.load(Ordering::Relaxed) {
         node.spin_once(Duration::from_millis(100));
         pool.run_until_stalled();
     }
+    tracing::info!("termination signal received; shutting down");
+    Ok(())
 }
 
 fn now(clock: &Arc<Mutex<r2r::Clock>>) -> Time {

@@ -4,6 +4,12 @@ All notable changes to `husarion_asset_server`. Format follows [Keep a Changelog
 
 A `vX.Y.Z` tag (cut via `just release`) triggers two workflows: `release.yml` publishes prebuilt `asset_server` binaries (amd64 + arm64) on the GitHub Release — consumed by the rosbot snap via fetch-by-version, so the snap never compiles the r2r node from source — and `image.yml` publishes the universal provider image `husarion/asset-server:X.Y.Z` + `:latest` to Docker Hub. An `## [Unreleased]` section here is folded into the release section automatically by `just release`.
 
+## [Unreleased]
+
+### Fixed
+
+- **`asset_server` now handles SIGTERM/SIGINT and exits cleanly.** The container entrypoint execs the node as in-namespace PID 1, which gets no default signal dispositions — an unhandled SIGTERM was silently discarded, so `docker stop` (and every host shutdown, e.g. a robot power-button poweroff) hung for the full kill timeout before SIGKILL. Found live on a Lynx, where the provider added ~90 s to `systemd-shutdown` and pushed the poweroff into the power board's hard-cut window.
+
 ## [0.3.0] — 2026-07-22
 
 ### Added

@@ -29,6 +29,10 @@ path = "src/conformance.rs"
 # provider hosts a TYPED service and needs no untyped-server FFI.
 r2r = "0.9.5"
 anyhow = "1"
+# SIGTERM/SIGINT → clean exit. The container entrypoint execs asset_server as
+# in-namespace PID 1, which has no default signal dispositions — without an
+# explicit handler `docker stop` / a host shutdown waits its full kill timeout.
+signal-hook = { version = "0.3", default-features = false }
 clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
 serde_json = "1"
