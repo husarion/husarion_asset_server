@@ -210,6 +210,16 @@ docker run --rm --network host --ipc host --env-file /etc/husarion/ros.env \
 
 The image is **universal + mesh-less** (all RMWs, no robot descriptions): a deploy layers the driver's meshes on top. It's published multi-arch to Docker Hub as `husarion/asset-server:<version>` + `:latest` by `.github/workflows/image.yml` on a `vX.Y.Z` tag.
 
+### Why Rust (r2r) — build & distribution FAQ
+
+Fair questions come up about a Rust node in a C++-dominated ROS 2 world. The short answers:
+
+- **Nobody downstream ever runs cargo.** Both distribution channels ship compiled artifacts: the multi-arch Docker image above, and the prebuilt `asset_server` binaries (amd64 + arm64) attached to every GitHub Release — the rosbot snap fetches those directly, with no in-snap compile. The Rust toolchain exists only inside the `just check` / `Dockerfile` build containers; the dev host needs Docker, not cargo.
+- **No apt package — by design, not omission.** `bloom` cannot release cargo packages into the ROS apt repos today, so a `ros-jazzy-husarion-asset-server` deb is not possible; that is a real, known gap in ROS 2's Rust story. This node was never distributed via apt, though: its deploy surface is the image + release binaries. If a deb channel ever becomes a hard requirement, that ecosystem gap — not performance — is the honest cost of Rust here.
+- **The client library is [r2r](https://github.com/sequenceplanner/r2r), not `rclrs`.** r2r binds directly to `rcl` and the rosidl typesupport and builds with plain cargo against a sourced ROS env (plus optional ament_cargo integration for `ros2 run`). Benchmarks of `rclrs` — a different client library with a different executor — don't transfer to this node.
+- **Per-message latency is not a factor for this node.** `GetAsset` is a cold-path, on-demand chunked file service hit when a client fetches meshes (typically once, at startup): the work is disk I/O plus DDS transfer of megabyte-sized chunks, so a sub-millisecond client-library overhead disappears behind moving one chunk of one 2.4 MB mesh. For hot-path nodes (tf pipelines, control loops) client-library latency is a legitimate selection criterion — this is not one of those nodes.
+- **`husarion_asset_msgs` lives in its own repo on purpose.** It is the wire contract that multiple parties implement (this reference provider, the `husarion_rosbridge` client, any third-party provider) — the contract must be dependable without pulling in one vendor's implementation, mirroring how ROS keeps `common_interfaces` separate from the nodes that use them.
+
 ## License
 
 Apache-2.0.
