@@ -28,6 +28,7 @@ r2r needs a sourced ROS 2 Jazzy env + libclang + the colcon-built `husarion_asse
 - **Ownership** — `--owned-packages a,b` (explicit) OR auto-derived from a co-located latched `robot_description` (parse its `package://` URIs). Run **one per published robot_description**, co-located with the description publisher so its packages are on `AMENT_PREFIX_PATH`.
 - **Security (don't weaken):** `package://` only · no `..` traversal · owned-set only · resolved realpath confined to the package share dir.
 - The service is `{node_fqn}/get_asset` (namespaced via launch `namespace=` / `-r __ns:=` / `ROS_NAMESPACE`); the announce is `/asset_providers` (latched). The bridge reads the real provider name from the announce, not a guess.
+- **Identity must be unique per provider** — a duplicate FQN collides the service and merges the announces. The main loop counts announce-topic publishers sharing the node FQN (`get_publishers_info_by_topic`; r2r 0.9.5 has no `get_node_names`) once per heartbeat and warns loudly while a duplicate exists.
 
 ## Releasing
 

@@ -29,7 +29,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use clap::Parser;
 use futures::executor::LocalPool;
@@ -304,10 +304,46 @@ fn main() -> anyhow::Result<()> {
     }
 
     tracing::info!(service = %service_name, "husarion_asset_server ready");
+
+    // Duplicate-identity watchdog. Two providers launched with the same node
+    // name + namespace collide on the same `{fqn}/get_asset` service (requests
+    // round-robin between them) and their latched announces merge into one
+    // provider — silently wrong, and rcl never flags duplicate node names. So
+    // once per heartbeat period, count the announce-topic publishers that share
+    // this node's FQN (this provider's own publisher is one of them) and log
+    // loudly whenever that count changes.
+    let providers_topic_fqn = expand_topic(&args.providers_topic, &node.namespace()?);
+    let dup_check_period = Duration::from_secs_f64(args.heartbeat.max(1.0));
+    let mut next_dup_check = Instant::now() + dup_check_period;
+    let mut dup_peers = 0usize;
+
     let mut pool = pool;
     while !term.load(Ordering::Relaxed) {
         node.spin_once(Duration::from_millis(100));
         pool.run_until_stalled();
+        if Instant::now() < next_dup_check {
+            continue;
+        }
+        next_dup_check = Instant::now() + dup_check_period;
+        match node.get_publishers_info_by_topic(&providers_topic_fqn, false) {
+            Ok(pubs) => {
+                let peers = pubs
+                    .iter()
+                    .filter(|p| endpoint_fqn(&p.node_namespace, &p.node_name) == node_fqn)
+                    .count()
+                    .saturating_sub(1);
+                if peers != dup_peers {
+                    if peers > 0 {
+                        tracing::warn!(node = %node_fqn, service = %service_name, peers,
+                            "duplicate provider identity: another provider announces under this exact node name — the get_asset service collides and bridges merge the announces; give every provider a unique `-r __node:=` / `-r __ns:=`");
+                    } else {
+                        tracing::info!(node = %node_fqn, "duplicate provider identity cleared");
+                    }
+                    dup_peers = peers;
+                }
+            }
+            Err(e) => tracing::debug!(%e, "duplicate-identity check unavailable"),
+        }
     }
     tracing::info!("termination signal received; shutting down");
     Ok(())
@@ -495,6 +531,26 @@ fn media_type(path: &Path) -> &'static str {
     }
 }
 
+/// Fully qualified node name from an rmw endpoint's `(node_namespace,
+/// node_name)` pair (rmw reports the root namespace as `/`).
+fn endpoint_fqn(namespace: &str, name: &str) -> String {
+    if namespace.ends_with('/') {
+        format!("{namespace}{name}")
+    } else {
+        format!("{namespace}/{name}")
+    }
+}
+
+/// Expand a topic name the way rcl does for non-private names: an absolute
+/// name stays as-is, a relative one resolves under the node namespace.
+fn expand_topic(topic: &str, node_namespace: &str) -> String {
+    if topic.starts_with('/') {
+        topic.to_owned()
+    } else {
+        format!("{}/{topic}", node_namespace.trim_end_matches('/'))
+    }
+}
+
 /// Scrape every `package://PKG/...` referenced by a URDF/xacro string.
 fn packages_from_urdf(urdf: &str) -> HashSet<String> {
     let mut set = HashSet::new();
@@ -527,6 +583,29 @@ mod tests {
         assert!(pkgs.contains("rosbot_description"));
         assert!(pkgs.contains("husarion_components_description"));
         assert_eq!(pkgs.len(), 2);
+    }
+
+    #[test]
+    fn endpoint_fqns() {
+        assert_eq!(endpoint_fqn("/", "asset_server"), "/asset_server");
+        assert_eq!(
+            endpoint_fqn("/rosbot", "asset_server"),
+            "/rosbot/asset_server"
+        );
+        assert_eq!(endpoint_fqn("", "asset_server"), "/asset_server");
+    }
+
+    #[test]
+    fn topic_expansion() {
+        assert_eq!(
+            expand_topic("/asset_providers", "/rosbot"),
+            "/asset_providers"
+        );
+        assert_eq!(expand_topic("robot_description", "/"), "/robot_description");
+        assert_eq!(
+            expand_topic("robot_description", "/rosbot"),
+            "/rosbot/robot_description"
+        );
     }
 
     #[test]
