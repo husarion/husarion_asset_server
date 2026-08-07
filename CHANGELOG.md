@@ -4,11 +4,12 @@ All notable changes to `husarion_asset_server`. Format follows [Keep a Changelog
 
 A `vX.Y.Z` tag (cut via `just release`) triggers two workflows: `release.yml` publishes prebuilt `asset_server` binaries (amd64 + arm64) on the GitHub Release — consumed by the rosbot snap via fetch-by-version, so the snap never compiles the r2r node from source — and `image.yml` publishes the universal provider image `husarion/asset-server:X.Y.Z` + `:latest` to Docker Hub. An `## [Unreleased]` section here is folded into the release section automatically by `just release`.
 
-## [Unreleased]
+## [0.4.0] — 2026-08-07
 
 ### Added
 
 - **Duplicate-identity watchdog.** Two providers launched with the same node name + namespace collide on the same `{fqn}/get_asset` service (requests round-robin between them) and their latched announces merge into one provider — and rcl never flags duplicate node names. The provider now counts the announce-topic publishers sharing its node FQN once per heartbeat period and logs a loud warning while a duplicate identity is present (and an info line when it clears).
+- README FAQ covering why the provider is written in Rust on r2r, and the Docker-only build & prebuilt-binary distribution model that choice implies.
 
 ## [0.3.1] — 2026-07-24
 
