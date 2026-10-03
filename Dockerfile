@@ -74,6 +74,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-jazzy-rmw-fastrtps-cpp \
         ros-jazzy-rmw-zenoh-cpp \
     && rm -rf /var/lib/apt/lists/*
+# Patched Fast DDS (husarion/fastdds-patched). Stock Fast DDS has a shared-memory
+# transport bug (every release since 2.0.0): after two unclean process deaths the
+# robot's SHM world stops accepting NEW participants. The fix only holds if EVERY
+# process in that world loads the patched library, so this provider carries it
+# too. It must come after the RMW install above (which pulls stock
+# ros-jazzy-fastrtps), and is held so no later apt step can replace it. Nothing
+# in the build stage links Fast DDS (r2r links rcl/rmw_implementation; the msgs
+# typesupport links fastcdr only), so the runtime is the only place it is needed;
+# the find below fails the build if any other copy exists.
+ARG FASTDDS_PATCHED=v1
+ARG FASTDDS_SHA256_AMD64=0899019619144dd665d0f09246d504881654671756d8e1ec2dd8ebd3d862e57f
+ARG FASTDDS_SHA256_ARM64=59e48c80617f92f5b982a720efe9b1af8a419028a44c6c6aa8637df37bcee6a7
+RUN set -eu; arch=$(dpkg --print-architecture); \
+    case "$arch" in amd64) sum=$FASTDDS_SHA256_AMD64 ;; arm64) sum=$FASTDDS_SHA256_ARM64 ;; *) exit 1 ;; esac; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends curl ca-certificates; \
+    curl -fsSL -o /tmp/fastdds.deb \
+      "https://github.com/husarion/fastdds-patched/releases/download/${FASTDDS_PATCHED}/fastrtps-${ROS_DISTRO}-${arch}.deb"; \
+    echo "${sum}  /tmp/fastdds.deb" | sha256sum -c -; \
+    apt-get install -y --no-install-recommends /tmp/fastdds.deb; \
+    pkg=$(dpkg-deb -f /tmp/fastdds.deb Package); apt-mark hold "$pkg"; rm -f /tmp/fastdds.deb; \
+    dpkg-query -W -f='${Version}' "$pkg" | grep -q '+husarion'; \
+    dpkg --verify "$pkg"; \
+    test "$(find / -xdev \( -name 'libfastrtps.so*' -o -name 'libfastdds.so*' \) -type f -not -path "/opt/ros/${ROS_DISTRO}/lib/*" | wc -l)" = 0; \
+    rm -rf /var/lib/apt/lists/*
 # The message typesupport r2r links against at runtime + the ament_cargo install
 # prefix (the executable + package.xml, so `ros2 run`/`ros2 launch` resolve it).
 COPY --from=build /msgs/install /msgs/install

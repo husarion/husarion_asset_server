@@ -4,6 +4,12 @@ All notable changes to `husarion_asset_server`. Format follows [Keep a Changelog
 
 A `vX.Y.Z` tag (cut via `just release`) triggers two workflows: `release.yml` publishes prebuilt `asset_server` binaries (amd64 + arm64) on the GitHub Release — consumed by the rosbot snap via fetch-by-version, so the snap never compiles the r2r node from source — and `image.yml` publishes the universal provider image `husarion/asset-server:X.Y.Z` + `:latest` to Docker Hub. An `## [Unreleased]` section here is folded into the release section automatically by `just release`.
 
+## [Unreleased]
+
+### Fixed
+
+- **The image carries a patched Fast DDS that keeps the robot's ROS network open to new nodes after a process crashes.** Stock Fast DDS (every release since 2.0.0) has a shared-memory transport bug: after two processes die uncleanly, the robot's shared-memory DDS world stops accepting new participants. The runtime now installs `ros-jazzy-fastrtps` from [husarion/fastdds-patched](https://github.com/husarion/fastdds-patched/releases/tag/v1) (`2.14.6…+husarion1`, sha256-pinned in the `Dockerfile`, held with `apt-mark hold`). The fix only protects the robot if every process in that world loads the patched library, which is why this provider carries it too.
+
 ## [0.4.0] — 2026-08-07
 
 ### Added
