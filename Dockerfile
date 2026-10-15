@@ -83,9 +83,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # in the build stage links Fast DDS (r2r links rcl/rmw_implementation; the msgs
 # typesupport links fastcdr only), so the runtime is the only place it is needed;
 # the find below fails the build if any other copy exists.
-ARG FASTDDS_PATCHED=v2
-ARG FASTDDS_SHA256_AMD64=d40d2f66309f36bb7f4fda46626ba4c492347b8e0d340c742703875c16aa74ae
-ARG FASTDDS_SHA256_ARM64=267a7b18834309f5ea17888fe37be4ae53371a2ddb8f9950e7c00be1b474fde9
+# v4 also fixes large samples sent over shared memory: a message of 64 KiB
+# or more lost its last 60 bytes whenever the payload byte 60 from the end
+# was 0x80, so about one large sample in 256, a camera frame say, arrived cut.
+ARG FASTDDS_PATCHED=v4
+ARG FASTDDS_SHA256_AMD64=b5646e678819513a2fc1a60b7fcf6b004375b0c1e944e836a0e79a37856652fe
+ARG FASTDDS_SHA256_ARM64=4e22fd6d746e5804454d7671d9bc81100bae60cecf951124a22dfb6669ac90c8
 RUN set -eu; arch=$(dpkg --print-architecture); \
     case "$arch" in amd64) sum=$FASTDDS_SHA256_AMD64 ;; arm64) sum=$FASTDDS_SHA256_ARM64 ;; *) exit 1 ;; esac; \
     apt-get update; \
