@@ -86,9 +86,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # v4 also fixes large samples sent over shared memory: a message of 64 KiB
 # or more lost its last 60 bytes whenever the payload byte 60 from the end
 # was 0x80, so about one large sample in 256, a camera frame say, arrived cut.
-ARG FASTDDS_PATCHED=v4
-ARG FASTDDS_SHA256_AMD64=b5646e678819513a2fc1a60b7fcf6b004375b0c1e944e836a0e79a37856652fe
-ARG FASTDDS_SHA256_ARM64=4e22fd6d746e5804454d7671d9bc81100bae60cecf951124a22dfb6669ac90c8
+# v5 adds an opt-in host id: FASTDDS_HOST_ID (0 to 0xFFFF) pins the id every
+# shared-memory locator carries, so a process that starts before the network
+# address changes still joins the others. It has no default: the deployment
+# sets the same value on every process on the host, the image sets nothing.
+ARG FASTDDS_PATCHED=v5
+ARG FASTDDS_SHA256_AMD64=322b33f4a9a8437c5794dd927c282814cd15ed7c4a75389a156a5212379866ca
+ARG FASTDDS_SHA256_ARM64=12dbcaf214115950bd5d7dcbb9f7e6ca66f0c8c00419f664a498174b77bf6bdd
 RUN set -eu; arch=$(dpkg --print-architecture); \
     case "$arch" in amd64) sum=$FASTDDS_SHA256_AMD64 ;; arm64) sum=$FASTDDS_SHA256_ARM64 ;; *) exit 1 ;; esac; \
     apt-get update; \

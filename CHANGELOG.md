@@ -4,6 +4,12 @@ All notable changes to `husarion_asset_server`. Format follows [Keep a Changelog
 
 A `vX.Y.Z` tag (cut via `just release`) triggers two workflows: `release.yml` publishes prebuilt `asset_server` binaries (amd64 + arm64) on the GitHub Release — consumed by the rosbot snap via fetch-by-version, so the snap never compiles the r2r node from source — and `image.yml` publishes the universal provider image `husarion/asset-server:X.Y.Z` + `:latest` to Docker Hub. An `## [Unreleased]` section here is folded into the release section automatically by `just release`.
 
+## [Unreleased]
+
+### Changed
+
+- **Patched Fast DDS v5: the robot's ROS world can stay whole when its network address changes during start-up.** The image now installs `ros-jazzy-fastrtps` `+husarion7` from [husarion/fastdds-patched v5](https://github.com/husarion/fastdds-patched/releases/tag/v5) (sha256-pinned in the `Dockerfile`, still held with `apt-mark hold`). Fast DDS stamps each shared-memory endpoint with a host id hashed from the IP addresses a process sees when it starts. On a host whose link or DHCP address comes up while its processes start, they end up with different ids and stop hearing each other over shared memory. v5 lets the `FASTDDS_HOST_ID` environment variable (0 to 0xFFFF) fix that id. The image sets no value: it only takes effect when the deployment gives every ROS process on the host the same `FASTDDS_HOST_ID`. v5 keeps the earlier shared-memory fixes, and every process in the world still needs the same patched library.
+
 ## [0.4.3] — 2026-10-15
 
 ### Fixed
