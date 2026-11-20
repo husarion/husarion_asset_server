@@ -2,7 +2,7 @@
 #
 #   just check     full gate, entirely in Docker (no host cargo/ROS): fmt +
 #                  clippy -D warnings + tests + the ament_cargo (colcon) build
-#                  + ros2-run resolution, inside a cached ros:jazzy-ros-core
+#                  + ros2-run resolution, inside a cached husarion/ros ros-core
 #                  toolchain image — the same package baseline the published
 #                  image builds against. Needs ../husarion_asset_msgs.
 #   just image     build the provider image locally (husarion/asset-server:dev).
@@ -19,7 +19,8 @@ set shell := ["bash", "-uc"]
 # The check gate's toolchain image (cached; rebuilt only when this file changes it).
 builder_image := "has-builder:jazzy"
 
-# Toolchain image for `just check`: ros:jazzy-ros-core + compilers + rustup
+# Toolchain image for `just check`: the Dockerfile's ROS_BASE (husarion/ros
+# ros-core, same digest) + compilers + rustup
 # (fmt, clippy) + the ament_cargo plumbing. ros-core, NOT ros-base, on purpose —
 # r2r binds + links the typesupport of EVERY rosidl package visible at build
 # time, so the gate must compile against the same package set the published
@@ -30,7 +31,7 @@ builder:
     #!/usr/bin/env bash
     set -euo pipefail
     docker build --platform linux/amd64 -t {{builder_image}} - <<'DOCKERFILE'
-    FROM ros:jazzy-ros-core
+    FROM husarion/ros:jazzy-ros-core-20261120@sha256:bff619b2e6b6a7fa2f861446fa4f2ed300c18549fc12afc5006358d0ba4963d7
     RUN apt-get update && apt-get install -y --no-install-recommends \
             build-essential curl clang libclang-dev git \
             python3-colcon-common-extensions python3-pip \

@@ -10,8 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     # ros-core, NOT ros-base: mirrors the image's build stage. r2r binds + links
     # every rosidl package visible at build time, so the gate must compile
-    # against the same package set the published image builds against.
-    container: ros:jazzy-ros-core
+    # against the same package set the published image builds against: the
+    # Dockerfile's ROS_BASE (husarion/ros ros-core), at the same digest.
+    container: husarion/ros:jazzy-ros-core-20261120@sha256:bff619b2e6b6a7fa2f861446fa4f2ed300c18549fc12afc5006358d0ba4963d7
     steps:
       - uses: actions/checkout@v4
         with:

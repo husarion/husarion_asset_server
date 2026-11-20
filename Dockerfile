@@ -16,6 +16,8 @@
 # combine). So this one image resolves package:// for any robot once its
 # descriptions are added, independent of the driver version.
 
+ARG ROS_BASE=husarion/ros:jazzy-ros-core-20261120@sha256:bff619b2e6b6a7fa2f861446fa4f2ed300c18549fc12afc5006358d0ba4963d7
+
 # ---- build: SAME baseline as the runtime (ros-core) + build tooling -----------
 # INVARIANT: build and runtime must expose the SAME rosidl package set. r2r binds
 # and LINKS the typesupport of every rosidl package on AMENT_PREFIX_PATH at build
@@ -23,7 +25,13 @@
 # base-vs-core delta, verified against the jazzy images), which a ros-core
 # runtime lacks, and the binary fails to load. ros-base has no build tooling
 # advantage anyway (colcon/clang are apt-installed either way).
-FROM ros:jazzy-ros-core AS build
+#
+# Both stages build FROM husarion/ros (husarion/ros-docker): the official
+# ros:jazzy-ros-core plus apt pinned to dated snapshots, the patched Fast DDS
+# (held) and all three RMWs. So the build stage sees exactly the runtime's
+# rosidl set, and the runtime installs no RMW or Fast DDS of its own. Pin the
+# multi-arch index digest; move it only together with a base release.
+FROM ${ROS_BASE} AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential curl clang libclang-dev git \
         python3-colcon-common-extensions python3-pip \
@@ -61,51 +69,14 @@ RUN bash -c "source /opt/ros/jazzy/setup.bash && \
         --install-base /opt/husarion_asset_server/install \
         --cargo-args --release"
 
-# ---- runtime: ros-core (same rosidl set as the build stage) + every RMW -------
-FROM ros:jazzy-ros-core AS provider
-# fastrtps is the ros-core default (kept explicit for self-documentation); add
-# cyclonedds + zenoh so the provider loads whatever RMW ros.env selects (a
-# single-RMW image crash-loops the moment the operator switches). RMW packages
-# add no rosidl packages, so build/runtime symmetry holds; std_msgs + the rest
-# of the typesupport the binary links is already in ros-core (verified), and
-# husarion_asset_msgs comes in via /msgs/install below.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ros-jazzy-rmw-cyclonedds-cpp \
-        ros-jazzy-rmw-fastrtps-cpp \
-        ros-jazzy-rmw-zenoh-cpp \
-    && rm -rf /var/lib/apt/lists/*
-# Patched Fast DDS (husarion/fastdds-patched). Stock Fast DDS has a shared-memory
-# transport bug (every release since 2.0.0): after two unclean process deaths the
-# robot's SHM world stops accepting NEW participants. The fix only holds if EVERY
-# process in that world loads the patched library, so this provider carries it
-# too. It must come after the RMW install above (which pulls stock
-# ros-jazzy-fastrtps), and is held so no later apt step can replace it. Nothing
-# in the build stage links Fast DDS (r2r links rcl/rmw_implementation; the msgs
-# typesupport links fastcdr only), so the runtime is the only place it is needed;
-# the find below fails the build if any other copy exists.
-# v4 also fixes large samples sent over shared memory: a message of 64 KiB
-# or more lost its last 60 bytes whenever the payload byte 60 from the end
-# was 0x80, so about one large sample in 256, a camera frame say, arrived cut.
-# v5 adds an opt-in host id: FASTDDS_HOST_ID (0 to 0xFFFF) pins the id every
-# shared-memory locator carries, so a process that starts before the network
-# address changes still joins the others. It has no default: the deployment
-# sets the same value on every process on the host, the image sets nothing.
-ARG FASTDDS_PATCHED=v5
-ARG FASTDDS_SHA256_AMD64=322b33f4a9a8437c5794dd927c282814cd15ed7c4a75389a156a5212379866ca
-ARG FASTDDS_SHA256_ARM64=12dbcaf214115950bd5d7dcbb9f7e6ca66f0c8c00419f664a498174b77bf6bdd
-RUN set -eu; arch=$(dpkg --print-architecture); \
-    case "$arch" in amd64) sum=$FASTDDS_SHA256_AMD64 ;; arm64) sum=$FASTDDS_SHA256_ARM64 ;; *) exit 1 ;; esac; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends curl ca-certificates; \
-    curl -fsSL -o /tmp/fastdds.deb \
-      "https://github.com/husarion/fastdds-patched/releases/download/${FASTDDS_PATCHED}/fastrtps-${ROS_DISTRO}-${arch}.deb"; \
-    echo "${sum}  /tmp/fastdds.deb" | sha256sum -c -; \
-    apt-get install -y --no-install-recommends /tmp/fastdds.deb; \
-    pkg=$(dpkg-deb -f /tmp/fastdds.deb Package); apt-mark hold "$pkg"; rm -f /tmp/fastdds.deb; \
-    dpkg-query -W -f='${Version}' "$pkg" | grep -q '+husarion'; \
-    dpkg --verify "$pkg"; \
-    test "$(find / -xdev \( -name 'libfastrtps.so*' -o -name 'libfastdds.so*' \) -type f -not -path "/opt/ros/${ROS_DISTRO}/lib/*" | wc -l)" = 0; \
-    rm -rf /var/lib/apt/lists/*
+# ---- runtime: the same husarion/ros ros-core as the build stage --------------
+# The base already carries every RMW the cockpit can select (cyclonedds /
+# fastrtps / zenoh) and the patched Fast DDS (husarion/fastdds-patched, held),
+# so a provider loads whatever RMW ros.env selects. RMW packages add no rosidl
+# packages, so build/runtime symmetry holds; husarion_asset_msgs comes in via
+# /msgs/install below. No apt-get here: an upgrade or a reinstall would copy
+# base packages into this layer and could replace the held Fast DDS.
+FROM ${ROS_BASE} AS provider
 # The message typesupport r2r links against at runtime + the ament_cargo install
 # prefix (the executable + package.xml, so `ros2 run`/`ros2 launch` resolve it).
 COPY --from=build /msgs/install /msgs/install
@@ -117,5 +88,10 @@ RUN chmod +x /docker-entrypoint.sh
 ENV PATH="/opt/husarion_asset_server/install/husarion_asset_server/lib/husarion_asset_server:${PATH}"
 LABEL org.opencontainers.image.source=https://github.com/husarion/husarion_asset_server \
       org.opencontainers.image.description="Universal ROS 2 package:// asset provider (GetAsset); all RMWs, meshes layered at deploy."
+# The held patched Fast DDS must survive into the image, and no second copy of
+# the library may come in with the copied trees.
+RUN apt-mark showhold | grep -x "ros-${ROS_DISTRO}-fastrtps" \
+    && dpkg-query -W -f='${Version}' "ros-${ROS_DISTRO}-fastrtps" | grep '+husarion' \
+    && test "$(find / -xdev \( -name 'libfastrtps.so*' -o -name 'libfastdds.so*' \) -type f -not -path "/opt/ros/${ROS_DISTRO}/lib/*" | wc -l)" = 0
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["asset_server"]
