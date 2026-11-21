@@ -4,6 +4,12 @@ All notable changes to `husarion_asset_server`. Format follows [Keep a Changelog
 
 A `vX.Y.Z` tag (cut via `just release`) triggers two workflows: `release.yml` publishes prebuilt `asset_server` binaries (amd64 + arm64) on the GitHub Release — consumed by the rosbot snap via fetch-by-version, so the snap never compiles the r2r node from source — and `image.yml` publishes the universal provider image `husarion/asset-server:X.Y.Z` + `:latest` to Docker Hub. An `## [Unreleased]` section here is folded into the release section automatically by `just release`.
 
+## [0.4.5] — 2026-11-21
+
+### Changed
+
+- **The image now builds on the shared `husarion/ros:jazzy-ros-core` base.** Both Dockerfile stages, the CI job and the `just check` toolchain start from `husarion/ros:jazzy-ros-core-20261120`, pinned by its multi-arch digest. Build and runtime therefore still see the same rosidl package set. The base is the official `ros:jazzy-ros-core` with apt pinned to dated snapshots, all three RMWs (cyclonedds / fastrtps / zenoh) and the patched Fast DDS (held). Because of that, the runtime stage no longer installs any RMW or Fast DDS itself, and it runs no `apt-get` that could replace the held library. The image build now fails unless `ros-jazzy-fastrtps` is still held at a `+husarion` version and no second copy of the Fast DDS library came in.
+
 ## [0.4.4] — 2026-10-28
 
 ### Changed
